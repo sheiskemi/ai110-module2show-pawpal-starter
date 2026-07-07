@@ -74,14 +74,12 @@ Sample test output:
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
-
 | Feature | Method(s) | Notes |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Task sorting | `Scheduler.sort_by_time()` | Sorts tasks chronologically by `preferred_time`. Since times are stored as zero-padded `"HH:MM"` strings, plain string comparison already matches chronological order, so no time-parsing is needed just to sort. Tasks with no `preferred_time` sort last. `build_plan()` calls this to order the final `scheduled_tasks` for display, after priority decided *which* tasks got included. |
+| Filtering | `Owner.get_tasks(pet=, completed=, category=)`, `Scheduler.filter_tasks(tasks, completed=, pet_name=)` | `Owner.get_tasks()` filters across all of an owner's pets by pet object, completion status, and/or category. `Scheduler.filter_tasks()` filters an arbitrary task list by completion status and/or pet name — used for ad-hoc views (e.g., "show only Biscuit's incomplete tasks") independent of building a full plan. |
+| Conflict handling | `Task.conflicts_with(other)`, `Scheduler.detect_conflicts(tasks)`, `Scheduler.build_plan()` | `Task.conflicts_with()` checks whether two tasks' preferred times overlap, based on `preferred_time` + `duration_minutes`. `build_plan()` calls it while assembling a plan and skips (rather than double-books) a task that conflicts with one already scheduled, recording the reason in `DailyPlan.skip_reasons`. `Scheduler.detect_conflicts()` is a separate, lightweight pairwise scan (`itertools.combinations`) that returns human-readable warning strings for every overlapping pair across all tasks — including across different pets — without raising an exception. |
+| Recurring tasks | `Task.mark_complete()`, `Task.is_due()` | Each `Task` has a `recurrence` of `"once"`, `"daily"`, or `"weekly"`. Completing a `"daily"`/`"weekly"` task via `mark_complete()` retires that instance and automatically creates + attaches a new `Task` for the next occurrence, due `completed_on + timedelta(...)` (1 day or 1 week out). `is_due(on_date)` tells the scheduler whether a given task should appear in that day's plan based on its `due_date` and completion status. |
 
 ## 📸 Demo Walkthrough
 

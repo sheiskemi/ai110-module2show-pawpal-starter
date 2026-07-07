@@ -69,8 +69,11 @@ These were caught by re-reading the skeleton against the UML relationships rathe
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+`Scheduler.build_plan()` fills the day's time budget **greedily by priority**: it sorts all due tasks (high → medium → low) and adds each one in that order as long as it still fits in the remaining time, rather than searching for the combination of tasks that uses the time budget most fully (a knapsack-style optimization).
+
+Concretely, this means the scheduler can leave time on the table. For example, with a 40-minute budget and candidate tasks "Walk" (30 min, high), "Training" (25 min, medium), and "Feeding" (10 min, high): priority order tries Walk (30, high) first — fits, 10 min left — then Feeding (10, high) — fits exactly, 0 min left — then skips Training (25, medium) since it no longer fits. Total used: 40/40, which happens to be optimal here. But swap "Feeding" for a 15-minute high-priority task and the greedy approach schedules Walk (30) then skips the 15-minute task (only 10 min left), leaving 10 minutes unused, even though "Training" (25, medium) plus nothing else wouldn't fit either — a smarter packing could have found a better-fitting subset in some cases, but greedy-by-priority doesn't search for one.
+
+I chose this tradeoff deliberately: a true optimal-packing scheduler (dynamic programming knapsack) would guarantee full use of the time budget, but it would also let a pile of low-priority tasks "win" a slot over a higher-priority task just because they pack more efficiently into the remaining minutes. For a pet owner, "did the important stuff happen" matters more than "was every minute of free time accounted for" — a few unused minutes is a minor cost, but bumping a medication task for two shorter enrichment tasks because they fit better is the wrong behavior. Greedy-by-priority also stays O(n log n) (just a sort) and is easy to explain in `DailyPlan.explanation()` ("skipped because not enough time was left"), whereas a knapsack-based explanation would be harder for an owner to reason about ("skipped because a different combination filled the day better").
 
 ---
 

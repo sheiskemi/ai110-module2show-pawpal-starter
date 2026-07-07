@@ -5,10 +5,24 @@ Classes: Task, Pet, Owner, Scheduler (plus DailyPlan, the Scheduler's output).
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
+from itertools import combinations
 from typing import Optional
 
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+# How far out the next occurrence of a recurring task is scheduled, once the
+# current occurrence is marked complete.
+RECURRENCE_INTERVALS = {
+    "daily": timedelta(days=1),
+    "weekly": timedelta(weeks=1),
+}
+
+
+def _time_to_minutes(hhmm: str) -> int:
+    """Convert a "HH:MM" string into minutes since midnight."""
+    hours, minutes = hhmm.split(":")
+    return int(hours) * 60 + int(minutes)
 
 
 @dataclass
@@ -19,34 +33,65 @@ class Task:
     duration_minutes: int
     priority: str  # "high" | "medium" | "low"
     category: str = "general"  # e.g., walk, feeding, meds, enrichment, grooming
-    recurrence: str = "daily"  # e.g., daily, weekly
+    recurrence: str = "daily"  # "once" | "daily" | "weekly"
     preferred_time: Optional[str] = None  # e.g., "08:00"
+    due_date: Optional[date] = None  # calendar date this occurrence is due; None = due immediately
     completed: bool = False
+    last_completed_date: Optional[date] = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     # Back-reference to the owning Pet, set by Pet.add_task(). Excluded from
     # repr/eq so printing/comparing a Task doesn't recurse into its Pet.
     pet: Optional["Pet"] = field(default=None, repr=False, compare=False)
 
-    def mark_complete(self) -> None:
-        """Mark this task as completed."""
+    def mark_complete(self, on_date: Optional[date] = None) -> Optional["Task"]:
+        """Mark this task completed as of on_date (defaults to today).
+
+        For "daily"/"weekly" tasks, also creates and attaches (to the same
+        pet, if any) a new Task instance for the next occurrence, due
+        on_date + the recurrence interval. Returns that new Task, or None if
+        this task doesn't recur.
+        """
+        completed_on = on_date or date.today()
         self.completed = True
+        self.last_completed_date = completed_on
+
+        interval = RECURRENCE_INTERVALS.get(self.recurrence)
+        if interval is None:
+            return None
+
+        next_task = Task(
+            description=self.description,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            category=self.category,
+            recurrence=self.recurrence,
+            preferred_time=self.preferred_time,
+            due_date=completed_on + interval,
+        )
+        if self.pet is not None:
+            self.pet.add_task(next_task)
+        return next_task
 
     def mark_incomplete(self) -> None:
-        """Mark this task as not completed."""
+        """Mark this task as not completed and clear its last completion date."""
         self.completed = False
+        self.last_completed_date = None
+
+    def is_due(self, on_date: date) -> bool:
+        """True if this task should appear in a plan for on_date."""
+        if self.completed:
+            return False
+        if self.due_date is not None:
+            return on_date >= self.due_date
+        return True
 
     def conflicts_with(self, other: "Task") -> bool:
         """True if both tasks have a preferred_time and their durations overlap."""
         if self.preferred_time is None or other.preferred_time is None:
             return False
-
-        def to_minutes(hhmm: str) -> int:
-            hours, minutes = hhmm.split(":")
-            return int(hours) * 60 + int(minutes)
-
-        start_a = to_minutes(self.preferred_time)
+        start_a = _time_to_minutes(self.preferred_time)
         end_a = start_a + self.duration_minutes
-        start_b = to_minutes(other.preferred_time)
+        start_b = _time_to_minutes(other.preferred_time)
         end_b = start_b + other.duration_minutes
         return start_a < end_b and start_b < end_a
 
@@ -57,7 +102,9 @@ class Pet:
 
     name: str
     species: str
-    owner: Optional["Owner"] = None
+    # compare=False avoids infinite recursion: Owner's default __eq__ compares
+    # its pets list, which would compare each Pet's owner right back.
+    owner: Optional["Owner"] = field(default=None, repr=False, compare=False)
     tasks: list[Task] = field(default_factory=list)
 
     def add_task(self, task: Task) -> None:
@@ -106,6 +153,22 @@ class Owner:
         """
         return [task for pet in self.pets for task in pet.tasks]
 
+    def get_tasks(
+        self,
+        pet: Optional[Pet] = None,
+        completed: Optional[bool] = None,
+        category: Optional[str] = None,
+    ) -> list[Task]:
+        """Return tasks across all pets, optionally filtered by pet, status, or category."""
+        tasks = self.get_all_tasks()
+        if pet is not None:
+            tasks = [task for task in tasks if task.pet is pet]
+        if completed is not None:
+            tasks = [task for task in tasks if task.completed == completed]
+        if category is not None:
+            tasks = [task for task in tasks if task.category == category]
+        return tasks
+
 
 @dataclass
 class DailyPlan:
@@ -115,13 +178,15 @@ class DailyPlan:
     date: date
     scheduled_tasks: list[Task] = field(default_factory=list)
     skipped_tasks: list[Task] = field(default_factory=list)
+    # Maps task.id -> "time" | "conflict", explaining why a task was skipped.
+    skip_reasons: dict[str, str] = field(default_factory=dict)
 
     def total_time_used(self) -> int:
         """Return the total minutes used by all scheduled tasks."""
         return sum(task.duration_minutes for task in self.scheduled_tasks)
 
     def summary(self) -> str:
-        """Return a human-readable, ordered listing of the day's scheduled tasks."""
+        """Return a human-readable, chronologically ordered listing of the day's scheduled tasks."""
         if not self.scheduled_tasks:
             return f"No tasks scheduled for {self.date}."
         lines = [f"Plan for {self.owner.name} on {self.date}:"]
@@ -141,11 +206,15 @@ class DailyPlan:
             f"{self.total_time_used()} minutes."
         ]
         if self.skipped_tasks:
-            lines.append(f"Skipped {len(self.skipped_tasks)} task(s) due to time constraints:")
+            lines.append(f"Skipped {len(self.skipped_tasks)} task(s):")
             for task in self.skipped_tasks:
                 pet_name = task.pet.name if task.pet else "unknown pet"
+                reason = self.skip_reasons.get(task.id, "time")
+                reason_label = (
+                    "not enough time left" if reason == "time" else "conflicts with another scheduled task"
+                )
                 lines.append(
-                    f"  - {task.description} ({pet_name}, priority: {task.priority})"
+                    f"  - {task.description} ({pet_name}, priority: {task.priority}) - {reason_label}"
                 )
         return "\n".join(lines)
 
@@ -164,26 +233,80 @@ class Scheduler:
         """Store the daily time budget used when building plans."""
         self.available_time_minutes = available_time_minutes
 
+    def sort_by_time(self, tasks: list[Task]) -> list[Task]:
+        """Return tasks sorted chronologically by preferred_time.
+
+        "HH:MM" strings are zero-padded and fixed-width, so plain string
+        comparison already matches chronological order (e.g. "08:00" <
+        "09:05" lexicographically, same as it would numerically) - no need to
+        parse into minutes just to sort. Tasks with no preferred_time sort last.
+        """
+        return sorted(tasks, key=lambda task: task.preferred_time or "99:99")
+
+    def filter_tasks(
+        self,
+        tasks: list[Task],
+        completed: Optional[bool] = None,
+        pet_name: Optional[str] = None,
+    ) -> list[Task]:
+        """Return tasks filtered by completion status and/or owning pet's name."""
+        filtered = tasks
+        if completed is not None:
+            filtered = [task for task in filtered if task.completed == completed]
+        if pet_name is not None:
+            filtered = [task for task in filtered if task.pet and task.pet.name == pet_name]
+        return filtered
+
+    def detect_conflicts(self, tasks: list[Task]) -> list[str]:
+        """Scan tasks pairwise for overlapping preferred_times and return a warning
+        message per conflicting pair, across the same pet or different pets.
+
+        Lightweight by design: O(n^2) pairwise comparison, fine for the small
+        number of tasks a single owner schedules in a day. Returns warning
+        strings rather than raising, so a scheduling run can surface conflicts
+        without crashing or blocking the rest of the plan.
+        """
+        warnings: list[str] = []
+        for task_a, task_b in combinations(tasks, 2):
+            if not task_a.conflicts_with(task_b):
+                continue
+            pet_a = task_a.pet.name if task_a.pet else "unknown pet"
+            pet_b = task_b.pet.name if task_b.pet else "unknown pet"
+            warnings.append(
+                f"Warning: '{task_a.description}' ({pet_a}, {task_a.preferred_time}) "
+                f"conflicts with '{task_b.description}' ({pet_b}, {task_b.preferred_time})"
+            )
+        return warnings
+
     def build_plan(self, owner: Owner, plan_date: date) -> DailyPlan:
-        """Build a DailyPlan by greedily fitting the owner's tasks, highest priority first, into the time budget."""
-        candidate_tasks = [task for task in owner.get_all_tasks() if not task.completed]
+        """Build a DailyPlan: due tasks, highest priority first, greedily fit into the
+        time budget while skipping anything that conflicts with an already-scheduled task."""
+        candidate_tasks = [task for task in owner.get_all_tasks() if task.is_due(plan_date)]
         candidate_tasks.sort(key=lambda task: PRIORITY_ORDER.get(task.priority, 99))
 
         scheduled: list[Task] = []
         skipped: list[Task] = []
+        skip_reasons: dict[str, str] = {}
         time_used = 0
         for task in candidate_tasks:
-            if time_used + task.duration_minutes <= self.available_time_minutes:
+            if any(task.conflicts_with(other) for other in scheduled):
+                skipped.append(task)
+                skip_reasons[task.id] = "conflict"
+            elif time_used + task.duration_minutes <= self.available_time_minutes:
                 scheduled.append(task)
                 time_used += task.duration_minutes
             else:
                 skipped.append(task)
+                skip_reasons[task.id] = "time"
 
+        # Selection order above is priority-driven; display order should read
+        # chronologically.
         return DailyPlan(
             owner=owner,
             date=plan_date,
-            scheduled_tasks=scheduled,
+            scheduled_tasks=self.sort_by_time(scheduled),
             skipped_tasks=skipped,
+            skip_reasons=skip_reasons,
         )
 
     def explain(self, plan: DailyPlan) -> str:

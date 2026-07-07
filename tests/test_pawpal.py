@@ -137,13 +137,120 @@ def test_scheduler_skips_lower_priority_tasks_when_time_runs_out():
     assert "Nail trim" in skipped_descriptions
 
 
-def test_scheduler_excludes_completed_tasks():
+def test_scheduler_excludes_tasks_already_completed_today():
     owner, biscuit, _ = make_owner_with_pets()
-    done_task = Task("Morning walk", 30, "high", preferred_time="08:00", completed=True)
+    plan_date = date(2026, 7, 7)
+    done_task = Task("Morning walk", 30, "high", preferred_time="08:00")
+    done_task.mark_complete(plan_date)
     biscuit.add_task(done_task)
+
+    scheduler = Scheduler(available_time_minutes=60)
+    plan = scheduler.build_plan(owner, plan_date)
+
+    assert done_task not in plan.scheduled_tasks
+    assert done_task not in plan.skipped_tasks
+
+
+def test_mark_complete_on_daily_task_spawns_next_occurrence_due_tomorrow():
+    pet = Pet("Biscuit", "Dog")
+    task = Task("Morning walk", 30, "high", recurrence="daily", preferred_time="08:00")
+    pet.add_task(task)
+    completed_on = date(2026, 7, 7)
+
+    next_task = task.mark_complete(completed_on)
+
+    assert next_task is not None
+    assert next_task is not task
+    assert next_task in pet.tasks
+    assert next_task.due_date == date(2026, 7, 8)
+    assert task.is_due(completed_on) is False  # the completed instance is done for good
+    assert next_task.is_due(completed_on) is False  # not due until tomorrow
+    assert next_task.is_due(date(2026, 7, 8)) is True
+
+
+def test_mark_complete_on_weekly_task_spawns_next_occurrence_due_in_a_week():
+    pet = Pet("Biscuit", "Dog")
+    task = Task("Nail trim", 20, "low", recurrence="weekly")
+    pet.add_task(task)
+    completed_on = date(2026, 7, 1)
+
+    next_task = task.mark_complete(completed_on)
+
+    assert next_task is not None
+    assert next_task.due_date == date(2026, 7, 8)
+    assert next_task.is_due(date(2026, 7, 5)) is False
+    assert next_task.is_due(date(2026, 7, 8)) is True
+
+
+def test_mark_complete_on_once_task_does_not_spawn_a_new_task():
+    task = Task("Vet appointment", 60, "high", recurrence="once")
+
+    next_task = task.mark_complete(date(2026, 7, 7))
+
+    assert next_task is None
+    assert task.is_due(date(2026, 7, 8)) is False
+
+
+def test_scheduled_tasks_are_ordered_chronologically():
+    owner, biscuit, _ = make_owner_with_pets()
+    biscuit.add_task(Task("Feeding", 10, "high", preferred_time="08:30"))
+    biscuit.add_task(Task("Morning walk", 30, "high", preferred_time="08:00"))
 
     scheduler = Scheduler(available_time_minutes=60)
     plan = scheduler.build_plan(owner, date(2026, 7, 7))
 
-    assert done_task not in plan.scheduled_tasks
-    assert done_task not in plan.skipped_tasks
+    scheduled_descriptions = [task.description for task in plan.scheduled_tasks]
+    assert scheduled_descriptions == ["Morning walk", "Feeding"]
+
+
+def test_scheduler_skips_conflicting_task_even_with_time_available():
+    owner, biscuit, _ = make_owner_with_pets()
+    biscuit.add_task(Task("Morning walk", 30, "high", preferred_time="08:00"))
+    biscuit.add_task(Task("Vet call", 15, "high", preferred_time="08:15"))
+
+    scheduler = Scheduler(available_time_minutes=120)
+    plan = scheduler.build_plan(owner, date(2026, 7, 7))
+
+    scheduled_descriptions = [task.description for task in plan.scheduled_tasks]
+    skipped_descriptions = [task.description for task in plan.skipped_tasks]
+    assert scheduled_descriptions == ["Morning walk"]
+    assert skipped_descriptions == ["Vet call"]
+
+
+def test_detect_conflicts_warns_about_overlapping_tasks_across_pets():
+    owner, biscuit, whiskers = make_owner_with_pets()
+    walk = Task("Morning walk", 30, "high", preferred_time="08:00")
+    vet_call = Task("Vet call", 15, "medium", preferred_time="08:15")
+    biscuit.add_task(walk)
+    whiskers.add_task(vet_call)
+
+    scheduler = Scheduler(available_time_minutes=120)
+    warnings = scheduler.detect_conflicts(owner.get_all_tasks())
+
+    assert len(warnings) == 1
+    assert "Morning walk" in warnings[0]
+    assert "Vet call" in warnings[0]
+
+
+def test_detect_conflicts_returns_empty_list_when_nothing_overlaps():
+    owner, biscuit, whiskers = make_owner_with_pets()
+    biscuit.add_task(Task("Morning walk", 30, "high", preferred_time="08:00"))
+    whiskers.add_task(Task("Litter box cleaning", 15, "medium", preferred_time="09:00"))
+
+    scheduler = Scheduler(available_time_minutes=120)
+    warnings = scheduler.detect_conflicts(owner.get_all_tasks())
+
+    assert warnings == []
+
+
+def test_owner_get_tasks_filters_by_pet_and_status():
+    owner, biscuit, whiskers = make_owner_with_pets()
+    walk = Task("Morning walk", 30, "high", preferred_time="08:00")
+    walk.mark_complete(date(2026, 7, 7))
+    litter = Task("Litter box cleaning", 15, "medium", preferred_time="09:00")
+    biscuit.add_task(walk)
+    whiskers.add_task(litter)
+
+    assert owner.get_tasks(pet=biscuit) == [walk]
+    assert owner.get_tasks(completed=True) == [walk]
+    assert owner.get_tasks(completed=False) == [litter]
