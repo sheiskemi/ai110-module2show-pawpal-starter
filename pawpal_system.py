@@ -25,6 +25,12 @@ def _time_to_minutes(hhmm: str) -> int:
     return int(hours) * 60 + int(minutes)
 
 
+def _minutes_to_time(total_minutes: int) -> str:
+    """Convert minutes since midnight into a zero-padded "HH:MM" string."""
+    hours, minutes = divmod(total_minutes, 60)
+    return f"{hours:02d}:{minutes:02d}"
+
+
 @dataclass
 class Task:
     """A single care activity for a pet."""
@@ -312,3 +318,39 @@ class Scheduler:
     def explain(self, plan: DailyPlan) -> str:
         """Return the reasoning behind a previously built DailyPlan."""
         return plan.explanation()
+
+    def find_next_available_slot(
+        self,
+        tasks: list[Task],
+        duration_minutes: int,
+        day_start: str = "08:00",
+        day_end: str = "20:00",
+    ) -> Optional[str]:
+        """Return the earliest "HH:MM" start time of at least duration_minutes
+        that doesn't overlap any of the given tasks' preferred_time windows,
+        searching within [day_start, day_end).
+
+        Tasks without a preferred_time are ignored (they aren't "busy" time
+        yet). Returns None if no gap of that size exists in the day. Useful
+        for suggesting a preferred_time for a new task rather than only
+        reacting to conflicts after the fact.
+        """
+        busy_windows = sorted(
+            (
+                _time_to_minutes(task.preferred_time),
+                _time_to_minutes(task.preferred_time) + task.duration_minutes,
+            )
+            for task in tasks
+            if task.preferred_time is not None
+        )
+        day_end_minutes = _time_to_minutes(day_end)
+
+        cursor = _time_to_minutes(day_start)
+        for busy_start, busy_end in busy_windows:
+            if cursor + duration_minutes <= busy_start:
+                return _minutes_to_time(cursor)
+            cursor = max(cursor, busy_end)
+
+        if cursor + duration_minutes <= day_end_minutes:
+            return _minutes_to_time(cursor)
+        return None

@@ -78,3 +78,9 @@ next_walk = walk.mark_complete(date.today())
 print(f"Biscuit's tasks after completing the walk: {len(biscuit.tasks)}")
 print(f"'{walk.description}' completed: {walk.completed}, due today: {walk.is_due(date.today())}")
 print(f"Next occurrence due date: {next_walk.due_date} (today + 1 day, since recurrence='daily')")
+
+print()
+print("=== Next-available-slot demo: Scheduler.find_next_available_slot() ===")
+new_task_duration = 20
+slot = scheduler.find_next_available_slot(owner.get_all_tasks(), duration_minutes=new_task_duration)
+print(f"Earliest {new_task_duration}-min opening today, given current tasks: {slot}")

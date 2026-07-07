@@ -375,3 +375,47 @@ def test_task_due_exactly_on_plan_date_is_included():
 
     assert task.is_due(date(2026, 7, 7)) is True
     assert task.is_due(date(2026, 7, 6)) is False
+
+
+# --- Next available slot ----------------------------------------------------
+
+
+def test_find_next_available_slot_before_first_busy_task():
+    tasks = [Task("Morning walk", 30, "high", preferred_time="09:00")]
+    scheduler = Scheduler(available_time_minutes=120)
+
+    slot = scheduler.find_next_available_slot(tasks, duration_minutes=20)
+
+    assert slot == "08:00"  # fits before the 09:00 task, starting at day_start
+
+
+def test_find_next_available_slot_fits_in_a_gap_between_tasks():
+    tasks = [
+        Task("Morning walk", 30, "high", preferred_time="08:00"),
+        Task("Lunch", 15, "medium", preferred_time="09:00"),
+    ]
+    scheduler = Scheduler(available_time_minutes=120)
+
+    slot = scheduler.find_next_available_slot(tasks, duration_minutes=20)
+
+    assert slot == "08:30"  # right after the walk ends, before lunch starts
+
+
+def test_find_next_available_slot_returns_none_when_day_is_full():
+    tasks = [Task("All day training", 720, "high", preferred_time="08:00")]
+    scheduler = Scheduler(available_time_minutes=720)
+
+    slot = scheduler.find_next_available_slot(
+        tasks, duration_minutes=30, day_start="08:00", day_end="20:00"
+    )
+
+    assert slot is None
+
+
+def test_find_next_available_slot_ignores_tasks_without_preferred_time():
+    tasks = [Task("Playtime", 15, "low")]  # no preferred_time
+    scheduler = Scheduler(available_time_minutes=120)
+
+    slot = scheduler.find_next_available_slot(tasks, duration_minutes=20)
+
+    assert slot == "08:00"

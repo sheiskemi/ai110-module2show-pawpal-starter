@@ -78,11 +78,11 @@ Sample successful test run:
 platform win32 -- Python 3.14.0, pytest-9.0.3, pluggy-1.6.0
 rootdir: C:\Users\vicky\codepath\ai110-module2show-pawpal-starter
 plugins: anyio-4.13.0
-collected 30 items                                                                                            
+collected 34 items
 
-tests\test_pawpal.py ..............................                                                     [100%]
+tests\test_pawpal.py ..................................                                                 [100%]
 
-============================================= 30 passed in 0.26s ==============================================
+============================================= 34 passed in 0.14s ==============================================
 ```
 
 ## ✨ Features
@@ -93,6 +93,7 @@ tests\test_pawpal.py ..............................                             
 - **Conflict warnings** — `Scheduler.detect_conflicts()` flags any two tasks (even across different pets) whose preferred times overlap, and `build_plan()` skips a lower-priority task instead of double-booking it.
 - **Daily/weekly recurrence** — `Task.mark_complete()` automatically spawns the next occurrence of a `"daily"` or `"weekly"` task, due one interval later; `"once"` tasks don't recur.
 - **Plan explanations** — `DailyPlan.summary()` and `DailyPlan.explanation()` (surfaced via `Scheduler.explain()`) describe what was scheduled, what was skipped, and why.
+- **Next-available-slot lookup** *(stretch)* — `Scheduler.find_next_available_slot(tasks, duration_minutes)` scans a day for the earliest open gap of a given length around existing preferred-time tasks, so a new task can be suggested a conflict-free time instead of only being checked for conflicts after the fact.
 
 ## 📐 Smarter Scheduling
 
@@ -102,6 +103,7 @@ tests\test_pawpal.py ..............................                             
 | Filtering | `Owner.get_tasks(pet=, completed=, category=)`, `Scheduler.filter_tasks(tasks, completed=, pet_name=)` | `Owner.get_tasks()` filters across all of an owner's pets by pet object, completion status, and/or category. `Scheduler.filter_tasks()` filters an arbitrary task list by completion status and/or pet name — used for ad-hoc views (e.g., "show only Biscuit's incomplete tasks") independent of building a full plan. |
 | Conflict handling | `Task.conflicts_with(other)`, `Scheduler.detect_conflicts(tasks)`, `Scheduler.build_plan()` | `Task.conflicts_with()` checks whether two tasks' preferred times overlap, based on `preferred_time` + `duration_minutes`. `build_plan()` calls it while assembling a plan and skips (rather than double-books) a task that conflicts with one already scheduled, recording the reason in `DailyPlan.skip_reasons`. `Scheduler.detect_conflicts()` is a separate, lightweight pairwise scan (`itertools.combinations`) that returns human-readable warning strings for every overlapping pair across all tasks — including across different pets — without raising an exception. |
 | Recurring tasks | `Task.mark_complete()`, `Task.is_due()` | Each `Task` has a `recurrence` of `"once"`, `"daily"`, or `"weekly"`. Completing a `"daily"`/`"weekly"` task via `mark_complete()` retires that instance and automatically creates + attaches a new `Task` for the next occurrence, due `completed_on + timedelta(...)` (1 day or 1 week out). `is_due(on_date)` tells the scheduler whether a given task should appear in that day's plan based on its `due_date` and completion status. |
+| Next-available-slot *(stretch)* | `Scheduler.find_next_available_slot(tasks, duration_minutes, day_start=, day_end=)` | Builds a sorted list of "busy" `(start, end)` windows from every task that has a `preferred_time`, then walks the day from `day_start` looking for the first gap — before the first busy window, between two busy windows, or after the last one — that's at least `duration_minutes` long. Returns `None` if the day has no gap that size. This flips conflict handling from reactive (detect an overlap after the fact) to proactive (suggest a time that won't overlap in the first place). |
 
 ## 📸 Demo Walkthrough
 
@@ -175,6 +177,19 @@ Biscuit's tasks before completing the walk: 2
 Biscuit's tasks after completing the walk: 3
 'Morning walk' completed: True, due today: False
 Next occurrence due date: 2026-07-08 (today + 1 day, since recurrence='daily')
+
+=== Next-available-slot demo: Scheduler.find_next_available_slot() ===
+Earliest 20-min opening today, given current tasks: 08:40
 ```
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
+
+## 🎨 Professional UI Formatting *(stretch)*
+
+The Streamlit UI in `app.py` uses Streamlit's built-in components rather than raw text to make output easy to scan at a glance:
+
+- **`st.table`** renders the sorted/filtered per-pet task list and the generated daily plan as structured tables (Time, Task, Duration, Priority, Category, Recurrence, Status columns) instead of plain markdown lines.
+- **`st.success`** confirms positive outcomes — a task marked complete, a plan built with total minutes used, or "no scheduling conflicts" for a pet.
+- **`st.warning`** flags every conflict with an actionable suggestion ("consider moving one of these to a different time"), visually distinct from informational skips.
+- **`st.info`** is reserved for neutral/expected states (no tasks yet, a task skipped only because the time budget ran out).
+- **Emoji status indicators** (✅ done / ⏳ pending, ⚠️ for conflicts, 🐾 branding) give an at-a-glance read of task and plan state without reading full sentences.
