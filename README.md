@@ -94,6 +94,7 @@ tests\test_pawpal.py ..................................                         
 - **Daily/weekly recurrence** — `Task.mark_complete()` automatically spawns the next occurrence of a `"daily"` or `"weekly"` task, due one interval later; `"once"` tasks don't recur.
 - **Plan explanations** — `DailyPlan.summary()` and `DailyPlan.explanation()` (surfaced via `Scheduler.explain()`) describe what was scheduled, what was skipped, and why.
 - **Next-available-slot lookup** *(stretch)* — `Scheduler.find_next_available_slot(tasks, duration_minutes)` scans a day for the earliest open gap of a given length around existing preferred-time tasks, so a new task can be suggested a conflict-free time instead of only being checked for conflicts after the fact.
+- **Data persistence** *(stretch)* — `save_owner()`/`load_owner()` serialize an `Owner` (and every `Pet`/`Task` beneath it) to/from JSON, so pets and tasks survive between app runs instead of resetting every time Streamlit restarts.
 
 ## 📐 Smarter Scheduling
 
@@ -183,6 +184,17 @@ Earliest 20-min opening today, given current tasks: 08:40
 ```
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
+
+## 💾 Data Persistence *(stretch)*
+
+Pets and tasks are stored in memory during a session (`st.session_state.owner`), but memory is wiped every time the Streamlit process restarts. To survive that, `pawpal_system.py` adds `Task.to_dict()`/`from_dict()`, `Pet.to_dict()`/`from_dict()`, and `Owner.to_dict()`/`from_dict()`, plus two module-level helpers:
+
+- **`save_owner(owner, path)`** — serializes the `Owner`, every `Pet`, and every `Task` beneath it to a JSON file (dates as ISO strings; the `Task.pet`/`Pet.owner` back-references are *not* serialized — they're rebuilt automatically via `add_pet()`/`add_task()` on load, so there's only one way to end up in an inconsistent state, not two sources of truth to keep in sync).
+- **`load_owner(path)`** — reads that JSON back into a fully-wired `Owner` object graph, including completion status, due dates, and recurrence, so a loaded task behaves identically to one that was never saved.
+
+**Workflow in the app:** `app.py` gained two buttons next to the owner name field — **💾 Save progress** writes the current `Owner` to `pawpal_data.json` in the project root; **📂 Reload from saved file** reads it back in, replacing whatever is in the current session. On a fresh app start, if `pawpal_data.json` already exists, it's loaded automatically instead of starting from an empty `Owner`. `pawpal_data.json` is listed in `.gitignore` since it's user data, not source.
+
+**Files modified:** `pawpal_system.py` (serialization methods + `save_owner`/`load_owner`), `app.py` (save/reload buttons + auto-load on startup), `tests/test_pawpal.py` (round-trip tests), `.gitignore` (exclude `pawpal_data.json`).
 
 ## 🎨 Professional UI Formatting *(stretch)*
 

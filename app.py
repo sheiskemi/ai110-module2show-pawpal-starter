@@ -1,8 +1,11 @@
+import os
 from datetime import date
 
 import streamlit as st
 
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import Owner, Pet, Scheduler, Task, load_owner, save_owner
+
+DATA_FILE = "pawpal_data.json"
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
 
@@ -23,13 +26,32 @@ owner_name = st.text_input("Owner name", value="Jordan")
 
 # Create the Owner once per session, then keep it updated in place on every
 # rerun rather than re-creating it (which would wipe out any pets/tasks
-# already added to session_state).
+# already added to session_state). On first load, restore from DATA_FILE if
+# it exists, so pets/tasks persist across app restarts, not just reruns.
 if "owner" not in st.session_state:
-    st.session_state.owner = Owner(name=owner_name)
+    if os.path.exists(DATA_FILE):
+        st.session_state.owner = load_owner(DATA_FILE)
+        st.session_state.owner.name = owner_name
+    else:
+        st.session_state.owner = Owner(name=owner_name)
 else:
     st.session_state.owner.name = owner_name
 
 owner = st.session_state.owner
+
+save_col, reload_col = st.columns(2)
+with save_col:
+    if st.button("💾 Save progress"):
+        save_owner(owner, DATA_FILE)
+        st.success(f"Saved {len(owner.pets)} pet(s) to {DATA_FILE}.")
+with reload_col:
+    if st.button("📂 Reload from saved file"):
+        if os.path.exists(DATA_FILE):
+            st.session_state.owner = load_owner(DATA_FILE)
+            st.success("Reloaded from saved file.")
+            st.rerun()
+        else:
+            st.info(f"No saved file found at {DATA_FILE} yet.")
 
 st.markdown("### Add a Pet")
 col1, col2 = st.columns(2)

@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from pawpal_system import Owner, Pet, Scheduler, Task
+from pawpal_system import Owner, Pet, Scheduler, Task, load_owner, save_owner
 
 
 def make_owner_with_pets():
@@ -419,3 +419,41 @@ def test_find_next_available_slot_ignores_tasks_without_preferred_time():
     slot = scheduler.find_next_available_slot(tasks, duration_minutes=20)
 
     assert slot == "08:00"
+
+
+# --- Persistence (save/load) ------------------------------------------------
+
+
+def test_save_and_load_owner_round_trips_pets_and_tasks(tmp_path):
+    owner, biscuit, whiskers = make_owner_with_pets()
+    biscuit.add_task(Task("Morning walk", 30, "high", preferred_time="08:00"))
+    whiskers.add_task(Task("Litter box cleaning", 15, "medium", preferred_time="09:00"))
+    path = tmp_path / "pawpal_data.json"
+
+    save_owner(owner, str(path))
+    loaded = load_owner(str(path))
+
+    assert loaded.name == owner.name
+    assert [p.name for p in loaded.pets] == ["Biscuit", "Whiskers"]
+    assert [t.description for t in loaded.pets[0].tasks] == ["Morning walk"]
+    assert loaded.pets[0].tasks[0].preferred_time == "08:00"
+
+
+def test_save_and_load_owner_preserves_task_state_and_pet_back_reference(tmp_path):
+    pet = Pet("Biscuit", "Dog")
+    task = Task("Morning walk", 30, "high", recurrence="daily", preferred_time="08:00")
+    pet.add_task(task)
+    task.mark_complete(date(2026, 7, 7))
+    owner = Owner("Sam")
+    owner.add_pet(pet)
+    path = tmp_path / "pawpal_data.json"
+
+    save_owner(owner, str(path))
+    loaded = load_owner(str(path))
+
+    loaded_pet = loaded.pets[0]
+    completed_task = next(t for t in loaded_pet.tasks if t.completed)
+    next_occurrence = next(t for t in loaded_pet.tasks if not t.completed)
+    assert completed_task.pet is loaded_pet
+    assert next_occurrence.due_date == date(2026, 7, 8)
+    assert next_occurrence.pet is loaded_pet

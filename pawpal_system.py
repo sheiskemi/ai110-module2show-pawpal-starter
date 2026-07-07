@@ -3,6 +3,7 @@
 Classes: Task, Pet, Owner, Scheduler (plus DailyPlan, the Scheduler's output).
 """
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -101,6 +102,44 @@ class Task:
         end_b = start_b + other.duration_minutes
         return start_a < end_b and start_b < end_a
 
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable representation of this task (excludes the `pet` back-reference)."""
+        return {
+            "id": self.id,
+            "description": self.description,
+            "duration_minutes": self.duration_minutes,
+            "priority": self.priority,
+            "category": self.category,
+            "recurrence": self.recurrence,
+            "preferred_time": self.preferred_time,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "completed": self.completed,
+            "last_completed_date": (
+                self.last_completed_date.isoformat() if self.last_completed_date else None
+            ),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Task":
+        """Reconstruct a Task from the dict produced by to_dict(). The `pet`
+        back-reference is not restored here; Pet.add_task() sets it."""
+        return cls(
+            id=data["id"],
+            description=data["description"],
+            duration_minutes=data["duration_minutes"],
+            priority=data["priority"],
+            category=data["category"],
+            recurrence=data["recurrence"],
+            preferred_time=data["preferred_time"],
+            due_date=date.fromisoformat(data["due_date"]) if data["due_date"] else None,
+            completed=data["completed"],
+            last_completed_date=(
+                date.fromisoformat(data["last_completed_date"])
+                if data["last_completed_date"]
+                else None
+            ),
+        )
+
 
 @dataclass
 class Pet:
@@ -135,6 +174,22 @@ class Pet:
             if task.id == task_id:
                 return task
         raise ValueError(f"No task with id {task_id!r} for pet {self.name!r}")
+
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable representation of this pet and its tasks (excludes the `owner` back-reference)."""
+        return {
+            "name": self.name,
+            "species": self.species,
+            "tasks": [task.to_dict() for task in self.tasks],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Pet":
+        """Reconstruct a Pet and its tasks from the dict produced by to_dict()."""
+        pet = cls(name=data["name"], species=data["species"])
+        for task_data in data["tasks"]:
+            pet.add_task(Task.from_dict(task_data))
+        return pet
 
 
 @dataclass
@@ -174,6 +229,35 @@ class Owner:
         if category is not None:
             tasks = [task for task in tasks if task.category == category]
         return tasks
+
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable representation of this owner, its pets, and their tasks."""
+        return {
+            "name": self.name,
+            "preferences": self.preferences,
+            "pets": [pet.to_dict() for pet in self.pets],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Owner":
+        """Reconstruct an Owner, its pets, and their tasks from the dict produced by to_dict()."""
+        owner = cls(name=data["name"], preferences=data["preferences"])
+        for pet_data in data["pets"]:
+            owner.add_pet(Pet.from_dict(pet_data))
+        return owner
+
+
+def save_owner(owner: Owner, path: str) -> None:
+    """Persist an Owner (and all of its pets/tasks) to a JSON file at path."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(owner.to_dict(), f, indent=2)
+
+
+def load_owner(path: str) -> Owner:
+    """Load an Owner (and all of its pets/tasks) from a JSON file at path."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return Owner.from_dict(data)
 
 
 @dataclass
