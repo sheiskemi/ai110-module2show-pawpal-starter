@@ -58,18 +58,31 @@ Scheduled 3 task(s) totaling 55 minutes.
 
 ## 🧪 Testing PawPal+
 
+The automated suite in [`tests/test_pawpal.py`](tests/test_pawpal.py) covers the core scheduling behaviors, including:
+
+- **Sorting correctness** — tasks are returned in chronological order by `preferred_time`, and tasks with no `preferred_time` sort last.
+- **Recurrence logic** — completing a `"daily"`/`"weekly"` task spawns a new task due one interval later (and attaches it to the same pet); `"once"` tasks don't spawn a successor.
+- **Conflict detection** — `Scheduler.detect_conflicts()` flags overlapping/duplicate-time tasks (including identical times across different pets), and `build_plan()` skips a lower-priority task rather than double-booking it.
+- **Edge cases** — an owner with no pets, a pet with no tasks, a task that exactly fills the time budget, back-to-back (non-overlapping) tasks, and a task due exactly on the plan date.
+
+Run the suite with:
+
 ```bash
-# Run the full test suite:
-pytest
-
-# Run with coverage:
-pytest --cov
+python -m pytest
 ```
 
-Sample test output:
+Sample successful test run:
 
 ```
-# Paste your pytest output here
+============================================ test session starts =============================================
+platform win32 -- Python 3.14.0, pytest-9.0.3, pluggy-1.6.0
+rootdir: C:\Users\vicky\codepath\ai110-module2show-pawpal-starter
+plugins: anyio-4.13.0
+collected 30 items                                                                                            
+
+tests\test_pawpal.py ..............................                                                     [100%]
+
+============================================= 30 passed in 0.26s ==============================================
 ```
 
 ## 📐 Smarter Scheduling

@@ -254,3 +254,124 @@ def test_owner_get_tasks_filters_by_pet_and_status():
     assert owner.get_tasks(pet=biscuit) == [walk]
     assert owner.get_tasks(completed=True) == [walk]
     assert owner.get_tasks(completed=False) == [litter]
+
+
+# --- Sorting correctness -----------------------------------------------
+
+
+def test_sort_by_time_returns_chronological_order_regardless_of_input_order():
+    tasks = [
+        Task("Evening walk", 20, "medium", preferred_time="18:00"),
+        Task("Breakfast", 10, "high", preferred_time="07:00"),
+        Task("Lunch", 10, "medium", preferred_time="12:00"),
+    ]
+
+    scheduler = Scheduler(available_time_minutes=120)
+    ordered = scheduler.sort_by_time(tasks)
+
+    assert [task.description for task in ordered] == ["Breakfast", "Lunch", "Evening walk"]
+
+
+def test_sort_by_time_places_tasks_without_preferred_time_last():
+    tasks = [
+        Task("Play session", 15, "low"),  # no preferred_time
+        Task("Breakfast", 10, "high", preferred_time="07:00"),
+    ]
+
+    scheduler = Scheduler(available_time_minutes=120)
+    ordered = scheduler.sort_by_time(tasks)
+
+    assert [task.description for task in ordered] == ["Breakfast", "Play session"]
+
+
+# --- Recurrence logic ----------------------------------------------------
+
+
+def test_completing_daily_task_creates_task_due_the_next_day():
+    pet = Pet("Biscuit", "Dog")
+    task = Task("Morning walk", 30, "high", recurrence="daily", preferred_time="08:00")
+    pet.add_task(task)
+
+    next_task = task.mark_complete(date(2026, 7, 7))
+
+    assert next_task.due_date == date(2026, 7, 8)
+    assert next_task.completed is False
+    assert next_task.id != task.id
+    assert len(pet.tasks) == 2  # original + newly spawned occurrence
+
+
+# --- Conflict detection ---------------------------------------------------
+
+
+def test_scheduler_flags_tasks_at_the_exact_same_preferred_time():
+    owner, biscuit, whiskers = make_owner_with_pets()
+    walk = Task("Morning walk", 30, "high", preferred_time="08:00")
+    feeding = Task("Feeding", 15, "medium", preferred_time="08:00")
+    biscuit.add_task(walk)
+    whiskers.add_task(feeding)
+
+    scheduler = Scheduler(available_time_minutes=120)
+    warnings = scheduler.detect_conflicts(owner.get_all_tasks())
+    plan = scheduler.build_plan(owner, date(2026, 7, 7))
+
+    assert len(warnings) == 1
+    assert "Morning walk" in warnings[0] and "Feeding" in warnings[0]
+    # Higher priority ("high") wins the slot; the duplicate-time task is skipped.
+    assert [task.description for task in plan.scheduled_tasks] == ["Morning walk"]
+    assert [task.description for task in plan.skipped_tasks] == ["Feeding"]
+
+
+def test_back_to_back_tasks_do_not_conflict():
+    # Walk runs 08:00-08:30, feeding starts exactly when it ends.
+    walk = Task("Morning walk", 30, "high", preferred_time="08:00")
+    feeding = Task("Feeding", 10, "medium", preferred_time="08:30")
+
+    assert not walk.conflicts_with(feeding)
+
+
+# --- Edge cases: empty input ------------------------------------------------
+
+
+def test_build_plan_for_owner_with_no_pets_returns_empty_plan():
+    owner = Owner("Sam")
+    scheduler = Scheduler(available_time_minutes=60)
+
+    plan = scheduler.build_plan(owner, date(2026, 7, 7))
+
+    assert plan.scheduled_tasks == []
+    assert plan.skipped_tasks == []
+    assert plan.summary() == "No tasks scheduled for 2026-07-07."
+
+
+def test_build_plan_for_pet_with_no_tasks_returns_empty_plan():
+    owner, biscuit, whiskers = make_owner_with_pets()
+    scheduler = Scheduler(available_time_minutes=60)
+
+    plan = scheduler.build_plan(owner, date(2026, 7, 7))
+
+    assert plan.scheduled_tasks == []
+    assert plan.skipped_tasks == []
+
+
+# --- Edge cases: time-budget boundary ---------------------------------------
+
+
+def test_task_that_exactly_fills_time_budget_is_scheduled():
+    owner, biscuit, _ = make_owner_with_pets()
+    biscuit.add_task(Task("Long walk", 60, "high", preferred_time="08:00"))
+
+    scheduler = Scheduler(available_time_minutes=60)
+    plan = scheduler.build_plan(owner, date(2026, 7, 7))
+
+    assert len(plan.scheduled_tasks) == 1
+    assert plan.skipped_tasks == []
+
+
+# --- Edge cases: due-date boundary -------------------------------------------
+
+
+def test_task_due_exactly_on_plan_date_is_included():
+    task = Task("Vet appointment", 30, "high", due_date=date(2026, 7, 7))
+
+    assert task.is_due(date(2026, 7, 7)) is True
+    assert task.is_due(date(2026, 7, 6)) is False
