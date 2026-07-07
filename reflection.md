@@ -2,15 +2,61 @@
 
 ## 1. System Design
 
+**Core user actions**
+
+Based on the scenario in the README, a user of PawPal+ should be able to:
+
+1. **Add a pet and owner profile** — enter basic owner and pet information (e.g., pet name, species/breed) so the app knows who it's planning care for.
+2. **Add and edit care tasks** — create tasks like walks, feeding, meds, enrichment, or grooming, each with a duration and priority, and update them as needs change.
+3. **Generate and view today's plan** — produce a daily schedule that fits the available time and respects task priorities/preferences, and see that plan along with an explanation of why tasks were included, excluded, or ordered the way they were.
+
+**Building blocks (candidate objects)**
+
+Brainstorming the main objects the system needs, based on the three core actions above:
+
+- **Owner**
+  - Attributes: `name`, `preferences` (e.g., preferred walk times, notes)
+  - Methods: none of its own yet — mostly a data holder referenced by `Pet`
+
+- **Pet**
+  - Attributes: `name`, `species`/`breed`, `owner`, `tasks` (list of `Task` objects)
+  - Methods: `add_task()`, `edit_task()`, `remove_task()` — manage the list of care tasks for this pet
+
+- **Task**
+  - Attributes: `title`, `duration_minutes`, `priority` (low/medium/high), `category` (walk, feeding, meds, enrichment, grooming), `recurrence` (e.g., daily/weekly), `preferred_time` (optional)
+  - Methods: mostly attribute getters/setters; maybe `conflicts_with(other_task)` to detect overlapping preferred times
+
+- **Scheduler** (or `PlanBuilder`)
+  - Attributes: `available_time_minutes`, `tasks` (candidate tasks to consider)
+  - Methods: `build_plan()` — sorts/filters tasks by priority and available time and returns a `DailyPlan`; `explain(plan)` — generates the reasoning text for why tasks were included/excluded/ordered
+
+- **DailyPlan**
+  - Attributes: `pet`, `scheduled_tasks` (ordered list with assigned times), `skipped_tasks`, `date`
+  - Methods: `total_time_used()`, `summary()` — formats the plan for display, `explanation()` — returns the reasoning behind the schedule
+
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+My initial UML (`diagrams/uml.mmd`) has five classes, each with a single clear responsibility:
+
+- **Owner** is a simple data holder for the person caring for the pet — just a `name` and a `preferences` dict (e.g., preferred walk times). It has no behavior of its own; it exists so `Pet` has someone to belong to.
+- **Pet** represents the animal being cared for (`name`, `species`, a reference to its `Owner`) and owns the list of `Task` objects associated with it. Its responsibility is managing that task list — `add_task()`, `edit_task()`, `remove_task()` — not scheduling.
+- **Task** models a single care item (title, duration, priority, category, recurrence, optional preferred time). It's mostly a data object, with `conflicts_with(other)` as its one piece of behavior for detecting overlapping preferred times.
+- **Scheduler** is the class responsible for turning a pet's tasks into a plan. It takes the available time and candidate tasks and is responsible for `build_plan()` (deciding what fits and in what order) and `explain()` (producing the reasoning). I split this out from `Pet` and `Task` on purpose so the scheduling algorithm isn't tangled up with data storage — `Pet` and `Task` shouldn't need to know *how* a plan gets built.
+- **DailyPlan** is the output object: the result of running the scheduler for a given pet and date, holding `scheduled_tasks` and `skipped_tasks` plus display/reasoning helpers (`total_time_used()`, `summary()`, `explanation()`).
+
+The relationships are intentionally shallow: `Owner` has many `Pet`s, `Pet` has many `Task`s, `Scheduler` creates a `DailyPlan`, and `DailyPlan` references the `Task`s it scheduled. I avoided adding extra classes (e.g., a separate `TimeSlot` or `Notification` class) since nothing in the current scenario requires them yet.
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+While reviewing the `pawpal_system.py` skeleton against the UML, I caught a few gaps and made three changes:
+
+1. **Added `Owner.pets`.** The UML showed "Owner '1' --> 'many' Pet", but the code only had the reverse link (`Pet.owner`). There was no way to look up all of an owner's pets without scanning every `Pet` instance. Added `pets: list[Pet]` to `Owner` so the relationship is navigable in both directions, matching the diagram.
+
+2. **Added `Task.id`.** `Pet.edit_task(task_id, ...)` and `Pet.remove_task(task_id)` both look up a task by id, but `Task` had no id field to match against — the methods were unimplementable as written. Added `id: str` (auto-generated via `uuid.uuid4()`) to `Task`.
+
+3. **Made `Scheduler` stateless.** The original constructor took its own `tasks` list *and* `build_plan()` separately took a `pet` (which has its own `tasks`) — two possible sources of truth for what's being scheduled, risking a mismatch if someone built a `Scheduler` from one task list but called `build_plan()` on a different pet. Removed `tasks` from the constructor; `Scheduler` now only holds `available_time_minutes`, and `build_plan(pet, date)` reads `pet.tasks` directly.
+
+These were caught by re-reading the skeleton against the UML relationships rather than during actual implementation, but the reasoning is the same: fix the data model before scheduling logic gets built on top of it and the gaps become harder to unwind.
 
 ---
 
