@@ -1,0 +1,67 @@
+classDiagram
+    class Task {
+        +str id
+        +str description
+        +int duration_minutes
+        +str priority
+        +str category
+        +str recurrence
+        +Optional~str~ preferred_time
+        +Optional~date~ due_date
+        +bool completed
+        +Optional~date~ last_completed_date
+        +Optional~Pet~ pet
+        +mark_complete(on_date) Optional~Task~
+        +mark_incomplete() None
+        +is_due(on_date) bool
+        +conflicts_with(other) bool
+    }
+
+    class Pet {
+        +str name
+        +str species
+        +Optional~Owner~ owner
+        +list~Task~ tasks
+        +add_task(task) None
+        +edit_task(task_id, updates) None
+        +remove_task(task_id) None
+        -_find_task(task_id) Task
+    }
+
+    class Owner {
+        +str name
+        +dict preferences
+        +list~Pet~ pets
+        +add_pet(pet) None
+        +get_all_tasks() list~Task~
+        +get_tasks(pet, completed, category) list~Task~
+    }
+
+    class Scheduler {
+        +int available_time_minutes
+        +sort_by_time(tasks) list~Task~
+        +filter_tasks(tasks, completed, pet_name) list~Task~
+        +detect_conflicts(tasks) list~str~
+        +build_plan(owner, plan_date) DailyPlan
+        +explain(plan) str
+    }
+
+    class DailyPlan {
+        +Owner owner
+        +date date
+        +list~Task~ scheduled_tasks
+        +list~Task~ skipped_tasks
+        +dict skip_reasons
+        +total_time_used() int
+        +summary() str
+        +explanation() str
+    }
+
+    Owner "1" --> "many" Pet : has
+    Pet "1" --> "many" Task : has
+    Task "many" --> "1" Pet : back-reference (pet)
+    Task ..> Task : mark_complete() creates next occurrence
+    Scheduler ..> Owner : reads tasks via get_all_tasks()
+    Scheduler ..> DailyPlan : creates
+    DailyPlan "1" --> "1" Owner : belongs to
+    DailyPlan "1" --> "many" Task : scheduled_tasks / skipped_tasks

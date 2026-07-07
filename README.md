@@ -85,6 +85,15 @@ tests\test_pawpal.py ..............................                             
 ============================================= 30 passed in 0.26s ==============================================
 ```
 
+## ✨ Features
+
+- **Chronological sorting** — `Scheduler.sort_by_time()` orders any task list by `preferred_time`, so plans and task lists always read top-to-bottom in the order they happen during the day.
+- **Filtering** — `Owner.get_tasks()` and `Scheduler.filter_tasks()` narrow a task list by pet, completion status, and/or category, powering the "All / Pending / Completed" view in the UI.
+- **Priority-driven daily planning** — `Scheduler.build_plan()` greedily fills the day's time budget with the highest-priority due tasks first, then re-sorts the result chronologically for display.
+- **Conflict warnings** — `Scheduler.detect_conflicts()` flags any two tasks (even across different pets) whose preferred times overlap, and `build_plan()` skips a lower-priority task instead of double-booking it.
+- **Daily/weekly recurrence** — `Task.mark_complete()` automatically spawns the next occurrence of a `"daily"` or `"weekly"` task, due one interval later; `"once"` tasks don't recur.
+- **Plan explanations** — `DailyPlan.summary()` and `DailyPlan.explanation()` (surfaced via `Scheduler.explain()`) describe what was scheduled, what was skipped, and why.
+
 ## 📐 Smarter Scheduling
 
 | Feature | Method(s) | Notes |
@@ -96,12 +105,76 @@ tests\test_pawpal.py ..............................                             
 
 ## 📸 Demo Walkthrough
 
-Describe your app in numbered steps so a reader can follow along without watching a video:
+### UI features
 
-1. <!-- Describe this step -->
-2. <!-- Describe this step -->
-3. <!-- Describe this step -->
-4. <!-- Describe this step -->
-5. <!-- Add more steps as needed -->
+The Streamlit app (`app.py`) lets a user:
+
+- Enter an owner name and add one or more pets (name + species).
+- Add tasks to a selected pet: title, duration, priority, category (walk / feeding / meds / enrichment / grooming / general), recurrence (once / daily / weekly), and an optional preferred time.
+- Filter a pet's task list to **All / Pending / Completed**, displayed in a sorted table with time, duration, priority, category, recurrence, and status columns.
+- Mark a pending task complete from a dropdown, which (for daily/weekly tasks) silently queues up the next occurrence.
+- See per-pet conflict warnings the moment two of that pet's tasks overlap in time.
+- Set a daily time budget and click **Generate schedule** to build a plan across *all* pets, showing which tasks were scheduled (with total minutes used), which were skipped (and why — time budget vs. conflict), and any remaining time conflicts across the whole household.
+
+### Example workflow
+
+1. Enter owner name "Sam" and add a pet, "Biscuit" (dog).
+2. Add a task: "Morning walk", 30 min, high priority, category "walk", recurs daily, preferred time 08:00.
+3. Add a second task: "Feeding", 10 min, high priority, category "feeding", recurs daily, preferred time 08:30.
+4. Add a pet "Whiskers" (cat) and a task "Vet call", 15 min, medium priority, preferred time 08:15 — overlaps with "Morning walk", so a conflict warning appears immediately under Whiskers' task list.
+5. Set the available time budget (e.g., 60 minutes) and click **Generate schedule** — the plan shows "Morning walk" and "Feeding" scheduled (55 minutes used), "Vet call" skipped as a conflict, and an explanation of why.
+
+### Key Scheduler behaviors demonstrated
+
+- **Sorting** — tasks entered out of order are displayed chronologically by `preferred_time`.
+- **Conflict warnings** — overlapping preferred times across different pets are flagged with an actionable message, and the lower-priority task is skipped rather than double-booked.
+- **Recurrence** — completing a daily/weekly task creates its next occurrence automatically.
+
+### Sample CLI output (`python main.py`)
+
+```
+=== Today's Schedule ===
+Plan for Sam on 2026-07-07:
+  08:00 - Morning walk (Biscuit, 30 min) [priority: high]
+  08:30 - Feeding (Biscuit, 10 min) [priority: high]
+  09:00 - Litter box cleaning (Whiskers, 15 min) [priority: medium]
+
+Scheduled 3 task(s) totaling 55 minutes.
+Skipped 1 task(s):
+  - Vet call (Whiskers, priority: medium) - conflicts with another scheduled task
+
+=== Sorting demo: Scheduler.sort_by_time() ===
+Before sorting (insertion order):
+  08:30 - Feeding
+  08:00 - Morning walk
+  09:00 - Litter box cleaning
+  17:00 - Nail trim
+  08:15 - Vet call
+After sorting:
+  08:00 - Morning walk
+  08:15 - Vet call
+  08:30 - Feeding
+  09:00 - Litter box cleaning
+  17:00 - Nail trim
+
+=== Filtering demo: Scheduler.filter_tasks() ===
+Incomplete tasks:
+  Feeding
+  Morning walk
+  Litter box cleaning
+  Vet call
+Biscuit's tasks:
+  Feeding
+  Morning walk
+
+=== Conflict detection demo: Scheduler.detect_conflicts() ===
+Warning: 'Morning walk' (Biscuit, 08:00) conflicts with 'Vet call' (Whiskers, 08:15)
+
+=== Recurring task demo: mark_complete() spawns the next occurrence ===
+Biscuit's tasks before completing the walk: 2
+Biscuit's tasks after completing the walk: 3
+'Morning walk' completed: True, due today: False
+Next occurrence due date: 2026-07-08 (today + 1 day, since recurrence='daily')
+```
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or link to a demo video here -->
